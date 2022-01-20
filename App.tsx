@@ -8,54 +8,236 @@
  * @format
  */
 
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {
+  Button,
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
-  StyleSheet,
   Text,
+  TextInput,
   useColorScheme,
   View,
 } from 'react-native';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+import {Colors} from 'react-native/Libraries/NewAppScreen';
 
-const Section: React.FC<{
+import superagent from 'superagent';
+import Postcode from '@actbase/react-daum-postcode';
+import DatePicker from 'react-native-date-picker';
+import {RadioButton, Checkbox} from 'react-native-paper';
+import RNPickerSelect from 'react-native-picker-select';
+import {launchImageLibrary} from 'react-native-image-picker';
+
+const baseUrl = 'https://backup.weehan.com';
+
+interface Field {
+  name: string;
   title: string;
-}> = ({children, title}) => {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
+  imageType: boolean;
+  required: boolean;
+  isUse: boolean;
+  member_join_form_srl?: number;
+  type?:
+    | 'text'
+    | 'homepage'
+    | 'email_address'
+    | 'tel'
+    | 'textarea'
+    | 'radio'
+    | 'select'
+    | 'checkbox'
+    | 'kr_zip'
+    | 'date';
+}
+type Form = Field[];
+interface ExtendedField {
+  member_join_form_srl: number;
+  default_value: string[];
+}
+
+async function getForm(): Promise<{form: Form; extended: ExtendedField[]}> {
+  const response = await superagent.get(
+    `${baseUrl}/modules/json/index.php?act=dispMemberSignUpForm`,
   );
-};
+  return {
+    form: response.body.member_config.signupForm,
+    extended: response.body.extend_form_list,
+  };
+}
+
+interface FormProps {
+  field: Field;
+  extended?: ExtendedField;
+}
+function Form({field, extended}: FormProps) {
+  const [zipVisible, setZipVisible] = useState(false);
+  const [dateVisible, setDateVisible] = useState(false);
+  const [radioValue, setRadioValue] = useState('');
+  const [checkboxValue, setCheckboxValue] = useState<string[]>([]);
+  const [selectValue, setSelectValue] = useState('');
+
+  if (zipVisible) {
+    return (
+      <Modal>
+        <SafeAreaView>
+          <Postcode
+            onError={console.error}
+            style={{width: 320, height: 320}}
+            jsOptions={{animation: true, hideMapBtn: true}}
+            onSelected={data => {
+              console.log(data);
+              setZipVisible(false);
+            }}
+          />
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  if (dateVisible) {
+    return (
+      <DatePicker
+        modal
+        mode="date"
+        open={dateVisible}
+        date={new Date()}
+        onConfirm={date => {
+          setDateVisible(false);
+          console.log(date);
+        }}
+        onCancel={() => {
+          setDateVisible(false);
+        }}
+      />
+    );
+  }
+
+  const Field = (() => {
+    if (field.imageType) {
+      return (
+        <Button
+          title="사진 선택"
+          onPress={() => {
+            launchImageLibrary({mediaType: 'photo'})
+              .then(console.log)
+              .catch(console.error);
+          }}
+        />
+      );
+    }
+    switch (field.type) {
+      case 'tel':
+        return (
+          <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+            <TextInput keyboardType="phone-pad" />
+            <Text>-</Text>
+            <TextInput keyboardType="phone-pad" />
+            <Text>-</Text>
+            <TextInput keyboardType="phone-pad" />
+          </View>
+        );
+      case 'kr_zip':
+        return (
+          <Button
+            title="우편번호"
+            onPress={() => {
+              setZipVisible(true);
+            }}
+          />
+        );
+      case 'date':
+        return (
+          <Button
+            title="날짜"
+            onPress={() => {
+              setDateVisible(true);
+            }}
+          />
+        );
+      case 'radio':
+        if (extended === undefined) {
+          return <Text>에러</Text>;
+        }
+        return (
+          <RadioButton.Group
+            onValueChange={newValue => setRadioValue(newValue)}
+            value={radioValue}>
+            <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+              {extended.default_value.map(value => (
+                <RadioButton.Item
+                  label={value}
+                  value={value}
+                  key={value}
+                  status={value === radioValue ? 'checked' : 'unchecked'}
+                  position="leading"
+                />
+              ))}
+            </View>
+          </RadioButton.Group>
+        );
+      case 'checkbox':
+        if (extended === undefined) {
+          return <Text>에러</Text>;
+        }
+        return (
+          <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+            {extended.default_value.map(value => (
+              <Checkbox.Item
+                label={value}
+                key={value}
+                status={checkboxValue.includes(value) ? 'checked' : 'unchecked'}
+                position="leading"
+                onPress={() => {
+                  if (checkboxValue.includes(value)) {
+                    setCheckboxValue(checkboxValue.filter(v => v !== value));
+                  } else {
+                    setCheckboxValue([...checkboxValue, value]);
+                  }
+                }}
+              />
+            ))}
+          </View>
+        );
+      case 'select':
+        if (extended === undefined) {
+          return <Text>에러</Text>;
+        }
+        return (
+          <RNPickerSelect
+            value={selectValue}
+            onValueChange={setSelectValue}
+            items={extended.default_value.map(value => ({
+              label: value,
+              value: value,
+            }))}
+          />
+        );
+      case 'textarea':
+        return <TextInput multiline />;
+      default:
+        return <TextInput />;
+    }
+  })();
+  return (
+    <>
+      <Text>{field.title}</Text>
+      {Field}
+    </>
+  );
+}
 
 const App = () => {
+  const [form, setForm] = useState<Form>([]);
+  const [extended, setExtended] = useState<ExtendedField[]>([]);
+
+  useEffect(() => {
+    getForm().then(({form, extended}) => {
+      setForm(form);
+      setExtended(extended);
+    });
+  }, []);
   const isDarkMode = useColorScheme() === 'dark';
 
   const backgroundStyle = {
@@ -68,48 +250,24 @@ const App = () => {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+        <View>
+          {form
+            .filter(({isUse}) => isUse)
+            .map(field => (
+              <Form
+                key={field.name}
+                field={field}
+                extended={
+                  field.member_join_form_srl === undefined
+                    ? undefined
+                    : extended[field.member_join_form_srl]
+                }
+              />
+            ))}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
 
 export default App;
