@@ -30,7 +30,8 @@ import {RadioButton, Checkbox} from 'react-native-paper';
 import RNPickerSelect from 'react-native-picker-select';
 import {launchImageLibrary} from 'react-native-image-picker';
 
-const baseUrl = 'https://backup.weehan.com';
+const baseUrl = 'http://backup.weehan.com';
+const referer = 'https://backup.weehan.com';
 
 interface Field {
   name: string;
@@ -60,16 +61,48 @@ interface ExtendedField {
   default_value: string[];
 }
 
-async function getForm(): Promise<{form: Form; extended: ExtendedField[]}> {
+interface MemberInfo {
+  [key: string]: any;
+}
+
+async function getForm(): Promise<{
+  form: Form;
+  extended: ExtendedField[];
+  memberInfo: MemberInfo;
+}> {
   await superagent.get(
     `${baseUrl}/modules/json/index.php?act=dispMemberLogout`,
   );
-  const response = await superagent.get(
-    `${baseUrl}/modules/json/index.php?act=dispMemberSignUpForm`,
+  await superagent
+    .post(`${baseUrl}/modules/json/index.php?act=procMemberLogin`)
+    .set('Content-Type', 'application/x-www-form-urlencoded')
+    .set('Referer', referer)
+    .send({
+      user_id: 'formtest',
+      password: '1q2w3e4r',
+    });
+
+  await superagent.get(
+    `${baseUrl}/modules/json/index.php?act=dispMemberModifyInfo`,
   );
+
+  await superagent
+    .post(`${baseUrl}/modules/json/index.php`)
+    .set('Content-Type', 'application/x-www-form-urlencoded')
+    .set('Referer', referer)
+    .send({
+      act: 'procMemberModifyInfoBefore',
+      password: '1q2w3e4r',
+    });
+
+  const response = await superagent.get(
+    `${baseUrl}/modules/json/index.php?act=dispMemberModifyInfo`,
+  );
+  console.log(Object.keys(response.body));
   return {
     form: response.body.member_config.signupForm,
     extended: response.body.extend_form_list,
+    memberInfo: response.body.member_info,
   };
 }
 
@@ -300,6 +333,7 @@ function Tel({field, state, setState}: FormProps) {
             [field.name]: phone,
           });
         }}
+        value={state[field.name]?.[0]}
       />
       <Text>-</Text>
       <TextInput
@@ -312,6 +346,7 @@ function Tel({field, state, setState}: FormProps) {
             [field.name]: phone,
           });
         }}
+        value={state[field.name]?.[1]}
       />
       <Text>-</Text>
       <TextInput
@@ -324,6 +359,7 @@ function Tel({field, state, setState}: FormProps) {
             [field.name]: phone,
           });
         }}
+        value={state[field.name]?.[2]}
       />
     </View>
   );
@@ -420,6 +456,10 @@ function Select({field, extended, state, setState}: FormProps) {
 }
 
 function Field({field, extended, state, setState}: FormProps) {
+  if (field.name === 'password') {
+    return null;
+  }
+
   const Input = (() => {
     if (field.imageType) {
       return <Image field={field} state={state} setState={setState} />;
@@ -476,6 +516,7 @@ function Field({field, extended, state, setState}: FormProps) {
             onEndEditing={({nativeEvent: {text}}) => {
               setState({...state, [field.name]: text});
             }}
+            value={state[field.name] as string}
           />
         );
     }
@@ -515,16 +556,14 @@ async function sendRequest(state: Record<string, string | string[]>) {
       body.append(key, value);
     }
   }
-  fetch(`${baseUrl}/modules/json/index.php?act=procMemberInsert`, {
+  fetch(`${baseUrl}/modules/json/index.php?act=procMemberModifyInfo`, {
     method: 'POST',
     body,
     headers: {
       'Content-Type': 'multipart/form-data',
-      Referer: baseUrl,
+      Referer: referer,
     },
-  })
-    .then(console.log)
-    .catch(console.error);
+  }).catch(console.error);
 }
 
 function Agreement({
@@ -568,7 +607,12 @@ function Mailing({
   state,
   setState,
 }: Pick<FormProps, 'state' | 'setState'>): JSX.Element {
-  const [radioValue, setRadioValue] = useState('');
+  const [radioValue, setRadioValue] = useState(
+    (state?.allow_mailing as string | undefined) ?? '',
+  );
+  useEffect(() => {
+    setRadioValue(state?.allow_mailing as string);
+  }, [state]);
 
   return (
     <View>
@@ -605,7 +649,12 @@ function Message({
   state,
   setState,
 }: Pick<FormProps, 'state' | 'setState'>): JSX.Element {
-  const [radioValue, setRadioValue] = useState('');
+  const [radioValue, setRadioValue] = useState<string>(
+    (state?.allow_message as string) ?? '',
+  );
+  useEffect(() => {
+    setRadioValue(state?.allow_message as string);
+  }, [state]);
 
   return (
     <View>
@@ -650,15 +699,22 @@ const App = () => {
   const [state, setState] = useState<Record<string, string | string[]>>({});
 
   useEffect(() => {
-    getForm().then(({form, extended}) => {
+    getForm().then(({form, extended, memberInfo}) => {
       setForm(form);
       setExtended(extended);
+      setState({
+        user_id: memberInfo.user_id,
+        email_address: memberInfo.email_address,
+        user_name: memberInfo.user_name,
+        nick_name: memberInfo.nick_name,
+        phone: memberInfo.phone,
+        allow_message: memberInfo.allow_message,
+        allow_mailing: memberInfo.allow_mailing,
+      });
     });
   }, []);
 
-  useEffect(() => {
-    console.log(state);
-  }, [state]);
+  useEffect(() => {}, [state]);
 
   const isDarkMode = useColorScheme() === 'dark';
 
@@ -673,7 +729,6 @@ const App = () => {
         contentInsetAdjustmentBehavior="automatic"
         style={backgroundStyle}>
         <View>
-          <Agreement state={state} setState={setState} />
           {form
             .filter(({isUse}) => isUse)
             .map(field => (
